@@ -9,7 +9,7 @@ TOUS VALIDÉS : données réelles disponibles
 # ============================================================================
 
 # ETF américains équivalents pour PEA (simulation)
-PEA_ETFS_WORKING = {
+PEA_ETFS = {
     'VT': {
         'name': 'Vanguard Total World Stock ETF',
         'isin': 'US9220427424',
@@ -105,7 +105,7 @@ PEA_ETFS_WORKING = {
 }
 
 # ETF américains pour CTO
-CTO_ETFS_WORKING = {
+CTO_ETFS = {
     'ACWI': {
         'name': 'iShares MSCI ACWI ETF',
         'isin': 'US4642872265',
@@ -249,7 +249,7 @@ def validate_working_config():
     import warnings
     warnings.filterwarnings('ignore')
     
-    all_tickers = list(PEA_ETFS_WORKING.keys()) + list(CTO_ETFS_WORKING.keys())
+    all_tickers = list(PEA_ETFS.keys()) + list(CTO_ETFS.keys())
     
     print("Validation tickers Yahoo Finance...")
     print("=" * 70)
