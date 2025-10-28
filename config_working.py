@@ -1,284 +1,252 @@
 """
-Configuration avec TICKERS YAHOO FINANCE FONCTIONNELS
-ETF américains équivalents pour tests système complet
-TOUS VALIDÉS : données réelles disponibles
+Configuration complète 20 ETF (9 PEA + 11 CTO).
+
+Structure : Liste de dictionnaires
+Chaque ETF est un dict avec : name, ticker, isin, category, expense_ratio, description
+
+Utilisé par :
+- portfolio_engine.py (orchestration analyse)
+- app.py (interface Streamlit)
 """
 
-# ============================================================================
-# UNIVERS ETF WORKING (100% FONCTIONNELS YAHOO FINANCE)
-# ============================================================================
+# =============================================================================
+# ETF ÉLIGIBLES PEA (9 ETF)
+# =============================================================================
 
-# ETF américains équivalents pour PEA (simulation)
-PEA_ETFS = {
-    'VT': {
-        'name': 'Vanguard Total World Stock ETF',
-        'isin': 'US9220427424',
-        'ticker_yahoo': 'VT',  # ✅ FONCTIONNE
-        'type': 'equity',
-        'region': 'World',
-        'ter': 0.0007,
-        'description': 'Équivalent MSCI World (proxy CW8)',
-        'pea_equivalent': 'CW8'
+PEA_ETFS = [
+    {
+        "name": "Vanguard Total World Stock ETF",
+        "ticker": "VT",
+        "isin": "US9220427424",
+        "category": "World Equity",
+        "expense_ratio": 0.07,
+        "description": "Exposition mondiale diversifiée (actions développés + émergents)"
     },
-    'VOO': {
-        'name': 'Vanguard S&P 500 ETF',
-        'isin': 'US9229083632',
-        'ticker_yahoo': 'VOO',  # ✅ FONCTIONNE
-        'type': 'equity',
-        'region': 'USA',
-        'ter': 0.0003,
-        'description': 'S&P 500 (proxy ESE)',
-        'pea_equivalent': 'ESE'
+    {
+        "name": "Vanguard S&P 500 ETF",
+        "ticker": "VOO",
+        "isin": "US9229087690",
+        "category": "US Large Cap",
+        "expense_ratio": 0.03,
+        "description": "500 plus grandes capitalisations américaines"
     },
-    'VWO': {
-        'name': 'Vanguard FTSE Emerging Markets ETF',
-        'isin': 'US9220428588',
-        'ticker_yahoo': 'VWO',  # ✅ FONCTIONNE
-        'type': 'equity',
-        'region': 'Emerging',
-        'ter': 0.0008,
-        'description': 'Marchés émergents (proxy AEEM)',
-        'pea_equivalent': 'AEEM'
+    {
+        "name": "Vanguard FTSE Emerging Markets ETF",
+        "ticker": "VWO",
+        "isin": "US9220428588",
+        "category": "Emerging Markets",
+        "expense_ratio": 0.08,
+        "description": "Actions marchés émergents (Chine, Inde, Brésil)"
     },
-    'VGK': {
-        'name': 'Vanguard FTSE Europe ETF',
-        'isin': 'US9219107094',
-        'ticker_yahoo': 'VGK',  # ✅ FONCTIONNE
-        'type': 'equity',
-        'region': 'Europe',
-        'ter': 0.0008,
-        'description': 'Europe (proxy PCEU)',
-        'pea_equivalent': 'PCEU'
+    {
+        "name": "Vanguard FTSE Europe ETF",
+        "ticker": "VGK",
+        "isin": "US9219097683",
+        "category": "Europe Equity",
+        "expense_ratio": 0.08,
+        "description": "Actions européennes développées"
     },
-    'EWJ': {
-        'name': 'iShares MSCI Japan ETF',
-        'isin': 'US4642872349',
-        'ticker_yahoo': 'EWJ',  # ✅ FONCTIONNE
-        'type': 'equity',
-        'region': 'Japan',
-        'ter': 0.0051,
-        'description': 'Japon (proxy JPX)',
-        'pea_equivalent': 'JPXE'
+    {
+        "name": "iShares MSCI Japan ETF",
+        "ticker": "EWJ",
+        "isin": "US4642872349",
+        "category": "Japan Equity",
+        "expense_ratio": 0.50,
+        "description": "Actions japonaises"
     },
-    'IWM': {
-        'name': 'iShares Russell 2000 ETF',
-        'isin': 'US4642876555',
-        'ticker_yahoo': 'IWM',  # ✅ FONCTIONNE
-        'type': 'equity',
-        'region': 'USA',
-        'ter': 0.0019,
-        'description': 'Small Cap USA (proxy RS2K)',
-        'pea_equivalent': 'RS2K'
+    {
+        "name": "iShares Russell 2000 ETF",
+        "ticker": "IWM",
+        "isin": "US4642872414",
+        "category": "US Small Cap",
+        "expense_ratio": 0.19,
+        "description": "Petites capitalisations américaines"
     },
-    'QQQ': {
-        'name': 'Invesco QQQ Trust',
-        'isin': 'US46090E1038',
-        'ticker_yahoo': 'QQQ',  # ✅ FONCTIONNE
-        'type': 'equity',
-        'region': 'USA',
-        'ter': 0.0020,
-        'description': 'Tech USA Nasdaq-100 (proxy PUST)',
-        'pea_equivalent': 'PUST'
+    {
+        "name": "Invesco QQQ Trust",
+        "ticker": "QQQ",
+        "isin": "US46090E1038",
+        "category": "US Tech",
+        "expense_ratio": 0.20,
+        "description": "100 plus grandes entreprises Nasdaq (tech-heavy)"
     },
-    'XLE': {
-        'name': 'Energy Select Sector SPDR Fund',
-        'isin': 'US81369Y8030',
-        'ticker_yahoo': 'XLE',  # ✅ FONCTIONNE
-        'type': 'equity',
-        'region': 'USA',
-        'ter': 0.0010,
-        'description': 'Secteur énergie (proxy BRES)',
-        'pea_equivalent': 'BRES'
+    {
+        "name": "Energy Select Sector SPDR Fund",
+        "ticker": "XLE",
+        "isin": "US81369Y8030",
+        "category": "Energy Sector",
+        "expense_ratio": 0.10,
+        "description": "Secteur énergétique américain"
     },
-    
-    # Obligations Safe Harbor
-    'SHY': {
-        'name': 'iShares 1-3 Year Treasury Bond ETF',
-        'isin': 'US4642872000',
-        'ticker_yahoo': 'SHY',  # ✅ FONCTIONNE
-        'type': 'bond',
-        'region': 'USA',
-        'ter': 0.0015,
-        'description': 'Obligations USA court terme (proxy OBLI)',
-        'pea_equivalent': 'OBLI'
+    {
+        "name": "iShares 1-3 Year Treasury Bond ETF",
+        "ticker": "SHY",
+        "isin": "US4642874329",
+        "category": "Short-Term Bonds",
+        "expense_ratio": 0.15,
+        "description": "Obligations d'État américaines court terme (protection)"
     }
-}
+]
 
-# ETF américains pour CTO
-CTO_ETFS = {
-    'ACWI': {
-        'name': 'iShares MSCI ACWI ETF',
-        'isin': 'US4642872265',
-        'ticker_yahoo': 'ACWI',  # ✅ FONCTIONNE
-        'type': 'equity',
-        'region': 'World',
-        'ter': 0.0032,
-        'description': 'Monde all countries (proxy IWDA)',
-        'cto_equivalent': 'IWDA'
+
+# =============================================================================
+# ETF COMPTE-TITRES ORDINAIRE (11 ETF)
+# =============================================================================
+
+CTO_ETFS = [
+    {
+        "name": "iShares MSCI ACWI ETF",
+        "ticker": "ACWI",
+        "isin": "US4642874576",
+        "category": "World Equity",
+        "expense_ratio": 0.32,
+        "description": "Actions mondiales (développés + émergents)"
     },
-    'VSS': {
-        'name': 'Vanguard FTSE All-World ex-US Small-Cap ETF',
-        'isin': 'US9219097683',
-        'ticker_yahoo': 'VSS',  # ✅ FONCTIONNE
-        'type': 'equity',
-        'region': 'World',
-        'ter': 0.0011,
-        'description': 'Small cap monde (proxy WSML)',
-        'cto_equivalent': 'WSML'
+    {
+        "name": "Vanguard FTSE All-World Small-Cap ETF",
+        "ticker": "VSS",
+        "isin": "US9219097848",
+        "category": "Global Small Cap",
+        "expense_ratio": 0.11,
+        "description": "Petites capitalisations mondiales"
     },
-    'IEMG': {
-        'name': 'iShares Core MSCI Emerging Markets ETF',
-        'isin': 'US4642874659',
-        'ticker_yahoo': 'IEMG',  # ✅ FONCTIONNE
-        'type': 'equity',
-        'region': 'Emerging',
-        'ter': 0.0009,
-        'description': 'Émergents large spectre (proxy EMIM)',
-        'cto_equivalent': 'EMIM'
+    {
+        "name": "iShares Core MSCI Emerging Markets ETF",
+        "ticker": "IEMG",
+        "isin": "US4642874220",
+        "category": "Emerging Markets",
+        "expense_ratio": 0.09,
+        "description": "Actions marchés émergents diversifiés"
     },
-    'MCHI': {
-        'name': 'iShares MSCI China ETF',
-        'isin': 'US4642872687',
-        'ticker_yahoo': 'MCHI',  # ✅ FONCTIONNE
-        'type': 'equity',
-        'region': 'China',
-        'ter': 0.0059,
-        'description': 'Chine large cap (proxy FXC)',
-        'cto_equivalent': 'FXC'
+    {
+        "name": "iShares MSCI China ETF",
+        "ticker": "MCHI",
+        "isin": "US4642874238",
+        "category": "China Equity",
+        "expense_ratio": 0.59,
+        "description": "Actions chinoises large/mid cap"
     },
-    'AAXJ': {
-        'name': 'iShares MSCI All Country Asia ex Japan ETF',
-        'isin': 'US4642881175',
-        'ticker_yahoo': 'AAXJ',  # ✅ FONCTIONNE
-        'type': 'equity',
-        'region': 'Asia',
-        'ter': 0.0069,
-        'description': 'Asie hors Japon (proxy DBXJ)',
-        'cto_equivalent': 'DBXJ'
+    {
+        "name": "iShares MSCI All Country Asia ex Japan ETF",
+        "ticker": "AAXJ",
+        "isin": "US4642863926",
+        "category": "Asia ex-Japan",
+        "expense_ratio": 0.68,
+        "description": "Actions asiatiques hors Japon"
     },
-    'VTWO': {
-        'name': 'Vanguard Russell 2000 ETF',
-        'isin': 'US9229087690',
-        'ticker_yahoo': 'VTWO',  # ✅ FONCTIONNE
-        'type': 'equity',
-        'region': 'USA',
-        'ter': 0.0010,
-        'description': 'Small Cap USA (proxy R2US)',
-        'cto_equivalent': 'R2US'
+    {
+        "name": "Vanguard Russell 2000 ETF",
+        "ticker": "VTWO",
+        "isin": "US9229083632",
+        "category": "US Small Cap",
+        "expense_ratio": 0.10,
+        "description": "Petites capitalisations américaines"
     },
-    'ONEQ': {
-        'name': 'Fidelity Nasdaq Composite Index ETF',
-        'isin': 'US3160928657',
-        'ticker_yahoo': 'ONEQ',  # ✅ FONCTIONNE
-        'type': 'equity',
-        'region': 'USA',
-        'ter': 0.0021,
-        'description': 'Nasdaq composite (proxy UST)',
-        'cto_equivalent': 'UST'
+    {
+        "name": "Fidelity Nasdaq Composite Index ETF",
+        "ticker": "ONEQ",
+        "isin": "US3160928030",
+        "category": "US Tech",
+        "expense_ratio": 0.21,
+        "description": "Nasdaq Composite (technologie)"
     },
-    'MDY': {
-        'name': 'SPDR S&P MidCap 400 ETF Trust',
-        'isin': 'US78464A7030',
-        'ticker_yahoo': 'MDY',  # ✅ FONCTIONNE
-        'type': 'equity',
-        'region': 'USA',
-        'ter': 0.0023,
-        'description': 'Mid Cap USA (proxy SPY4)',
-        'cto_equivalent': 'SPY4'
+    {
+        "name": "SPDR S&P MidCap 400 ETF Trust",
+        "ticker": "MDY",
+        "isin": "US78464A7087",
+        "category": "US Mid Cap",
+        "expense_ratio": 0.23,
+        "description": "Moyennes capitalisations américaines"
     },
-    'GDX': {
-        'name': 'VanEck Gold Miners ETF',
-        'isin': 'US92189F1066',
-        'ticker_yahoo': 'GDX',  # ✅ FONCTIONNE
-        'type': 'equity',
-        'region': 'Global',
-        'ter': 0.0051,
-        'description': 'Producteurs or (proxy SPGP)',
-        'cto_equivalent': 'SPGP'
+    {
+        "name": "VanEck Gold Miners ETF",
+        "ticker": "GDX",
+        "isin": "US92189F1066",
+        "category": "Gold Miners",
+        "expense_ratio": 0.51,
+        "description": "Sociétés minières aurifères (protection inflation)"
     },
-    
-    # Obligations Safe Harbor (système dual)
-    'IEF': {
-        'name': 'iShares 7-10 Year Treasury Bond ETF',
-        'isin': 'US4642872883',
-        'ticker_yahoo': 'IEF',  # ✅ FONCTIONNE
-        'type': 'bond',
-        'region': 'USA',
-        'ter': 0.0015,
-        'description': 'Obligations USA 7-10 ans (proxy IBTM)',
-        'cto_equivalent': 'IBTM'
+    {
+        "name": "iShares 7-10 Year Treasury Bond ETF",
+        "ticker": "IEF",
+        "isin": "US4642872265",
+        "category": "Intermediate Bonds",
+        "expense_ratio": 0.15,
+        "description": "Obligations d'État américaines moyen terme"
     },
-    'AGG': {
-        'name': 'iShares Core U.S. Aggregate Bond ETF',
-        'isin': 'US4642872265',
-        'ticker_yahoo': 'AGG',  # ✅ FONCTIONNE
-        'type': 'bond',
-        'region': 'USA',
-        'ter': 0.0003,
-        'description': 'Obligations agrégat USA (proxy AGGH)',
-        'cto_equivalent': 'AGGH'
+    {
+        "name": "iShares Core US Aggregate Bond ETF",
+        "ticker": "AGG",
+        "isin": "US4642872001",
+        "category": "Bond Aggregate",
+        "expense_ratio": 0.03,
+        "description": "Obligations américaines diversifiées"
     }
-}
+]
 
-# Paramètres stratégie (identiques config principale)
-MOMENTUM_WEIGHTS = {
-    '1m': 0.12,
-    '3m': 0.40,
-    '6m': 0.48
-}
 
-FILTERS = {
-    'sma_period_months': 10,
-    'volatility_multiplier': 1.5,
-    'max_drawdown_threshold': -0.10,
-    'min_momentum_score': 0.0
-}
+# =============================================================================
+# FONCTIONS UTILITAIRES
+# =============================================================================
 
-REBALANCING = {
-    'monthly': True,
-    'mid_month': True,
-    'mid_month_threshold': 0.0008,
-    'transaction_cost_pea': 0.0002,
-    'transaction_cost_cto': 0.0002
-}
+def get_all_tickers():
+    """Retourne liste complète des tickers (PEA + CTO)."""
+    return [etf['ticker'] for etf in PEA_ETFS] + [etf['ticker'] for etf in CTO_ETFS]
 
-# Validation
-def validate_working_config():
-    """Valide que tous les tickers fonctionnent"""
-    import yfinance as yf
-    import warnings
-    warnings.filterwarnings('ignore')
+
+def get_etf_info(ticker: str):
+    """
+    Récupère informations ETF par ticker.
     
-    all_tickers = list(PEA_ETFS.keys()) + list(CTO_ETFS.keys())
+    Args:
+        ticker: Symbol ETF (ex: "VOO")
+        
+    Returns:
+        Dict informations ETF ou None si non trouvé
+    """
+    all_etfs = PEA_ETFS + CTO_ETFS
+    for etf in all_etfs:
+        if etf['ticker'] == ticker:
+            return etf
+    return None
+
+
+def get_pea_tickers():
+    """Retourne liste tickers PEA uniquement."""
+    return [etf['ticker'] for etf in PEA_ETFS]
+
+
+def get_cto_tickers():
+    """Retourne liste tickers CTO uniquement."""
+    return [etf['ticker'] for etf in CTO_ETFS]
+
+
+def print_portfolio_summary():
+    """Affiche résumé configuration portefeuille."""
+    print("=" * 80)
+    print("CONFIGURATION PORTEFEUILLE DUAL MOMENTUM")
+    print("=" * 80)
     
-    print("Validation tickers Yahoo Finance...")
-    print("=" * 70)
+    print(f"\n📊 PEA : {len(PEA_ETFS)} ETF")
+    print("-" * 80)
+    for etf in PEA_ETFS:
+        print(f"  {etf['ticker']:6} | {etf['name']:40} | {etf['category']}")
     
-    working = []
-    failed = []
+    print(f"\n📊 CTO : {len(CTO_ETFS)} ETF")
+    print("-" * 80)
+    for etf in CTO_ETFS:
+        print(f"  {etf['ticker']:6} | {etf['name']:40} | {etf['category']}")
     
-    for ticker in all_tickers:
-        try:
-            data = yf.Ticker(ticker).history(period='5d')
-            if not data.empty:
-                working.append(ticker)
-                print(f"✅ {ticker}: OK ({len(data)} jours)")
-            else:
-                failed.append(ticker)
-                print(f"❌ {ticker}: ÉCHEC (données vides)")
-        except Exception as e:
-            failed.append(ticker)
-            print(f"❌ {ticker}: ERREUR ({str(e)[:50]})")
-    
-    print("=" * 70)
-    print(f"Résultat: {len(working)}/{len(all_tickers)} tickers fonctionnels")
-    
-    if len(working) == len(all_tickers):
-        print("✅ TOUS LES TICKERS VALIDÉS")
-        return True
-    else:
-        print(f"⚠️ {len(failed)} tickers en échec: {failed}")
-        return False
+    print(f"\n📈 TOTAL : {len(PEA_ETFS) + len(CTO_ETFS)} ETF")
+    print("=" * 80)
+
 
 if __name__ == "__main__":
-    validate_working_config()
+    # Test configuration
+    print_portfolio_summary()
+    
+    print("\n🧪 Test fonctions utilitaires...")
+    print(f"Tous tickers : {get_all_tickers()}")
+    print(f"\nInfo VOO : {get_etf_info('VOO')}")
+    print(f"\nTickers PEA : {get_pea_tickers()}")
+    print(f"Tickers CTO : {get_cto_tickers()}")
