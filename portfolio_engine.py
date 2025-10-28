@@ -15,6 +15,10 @@ Filtres :
 - Absolu : Score > 0 (protection bear market)
 - Tendance : Prix > SMA 10 mois (confirmation tendance)
 - Volatilité : Vol 1M < 1.5× Vol 12M (éviter actifs erratiques)
+
+Version: 2.0.0 - Production Ready (Phase 2 - Real Data)
+Author: GLOBAL ICON
+Date: 2025-10-28
 """
 
 import pandas as pd
@@ -23,14 +27,79 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional
 import logging
 
-# Imports modules internes
-from data_fetcher_hybrid import fetch_historical_data, get_latest_prices, validate_data
+# =============================================================================
+# IMPORTS MODULES INTERNES - DONNÉES AVEC FALLBACK AUTOMATIQUE
+# =============================================================================
+
+# Import données avec fallback automatique MVP → Production
+try:
+    from data_fetcher_real import fetch_historical_data, get_latest_prices, validate_data
+    DATA_SOURCE = "REAL"
+    logger = logging.getLogger(__name__)
+    logger.info("=" * 80)
+    logger.info("✅ MODE PRODUCTION : Données réelles activées")
+    logger.info("   Source : Yahoo Finance (gratuit, illimité)")
+    logger.info("   Fallback : Alpha Vantage (optionnel, 25 req/jour)")
+    logger.info("   Cache : Local JSON (6h validité)")
+    logger.info("=" * 80)
+except ImportError as e:
+    from data_fetcher_hybrid import fetch_historical_data, get_latest_prices, validate_data
+    DATA_SOURCE = "SIMULATED"
+    logger = logging.getLogger(__name__)
+    logger.warning("=" * 80)
+    logger.warning("⚠️  MODE MVP : Données simulées académiques")
+    logger.warning(f"   Raison : data_fetcher_real non disponible ({e})")
+    logger.warning("   Impact : Paramètres statistiques réalistes mais prix simulés")
+    logger.warning("   Usage : Formation, démonstration, validation stratégie")
+    logger.warning("=" * 80)
+
+# Imports autres modules internes
 from momentum_engine import MomentumEngine
 from config_working import PEA_ETFS, CTO_ETFS
 
-# Configuration logging
-logger = logging.getLogger(__name__)
+# Configuration logging (si pas déjà configuré)
+if not logger.hasHandlers():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s | %(name)-20s | %(levelname)-8s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
 
+
+# =============================================================================
+# FONCTION UTILITAIRE - DÉTECTION MODE DONNÉES
+# =============================================================================
+
+def get_data_source_info() -> Dict[str, str]:
+    """
+    Retourne informations source données actuelle.
+    
+    Utilisé par app.py pour afficher indicateur sidebar.
+    
+    Returns:
+        Dict avec clés : source, description, status, icon, color
+    """
+    if DATA_SOURCE == "REAL":
+        return {
+            'source': 'REAL',
+            'description': 'Données réelles Yahoo Finance',
+            'status': 'production',
+            'icon': '📡',
+            'color': 'success'
+        }
+    else:
+        return {
+            'source': 'SIMULATED',
+            'description': 'Données simulées académiques',
+            'status': 'mvp',
+            'icon': '🧪',
+            'color': 'warning'
+        }
+
+
+# =============================================================================
+# CLASSE PRINCIPALE - DUAL MOMENTUM PORTFOLIO
+# =============================================================================
 
 class DualMomentumPortfolio:
     """
@@ -41,6 +110,7 @@ class DualMomentumPortfolio:
         cto_etfs: Liste tickers ETF compte-titres ordinaire
         lookback_period: Période analyse momentum (défaut 12 mois)
         momentum_engine: Instance moteur calculs momentum
+        data_source: Source données actuelle ('REAL' ou 'SIMULATED')
     """
     
     def __init__(
@@ -61,9 +131,17 @@ class DualMomentumPortfolio:
         self.cto_etfs = cto_etfs or [etf['ticker'] for etf in CTO_ETFS]
         self.lookback_period = lookback_period
         self.momentum_engine = MomentumEngine()
+        self.data_source = DATA_SOURCE  # Exposition info source données
         
-        logger.info(f"Portfolio initialisé : {len(self.pea_etfs)} PEA + "
-                   f"{len(self.cto_etfs)} CTO = {len(self.pea_etfs) + len(self.cto_etfs)} ETFs")
+        logger.info("=" * 80)
+        logger.info("🚀 INITIALISATION DUAL MOMENTUM PORTFOLIO")
+        logger.info("=" * 80)
+        logger.info(f"Portfolio PEA : {len(self.pea_etfs)} ETF")
+        logger.info(f"Portfolio CTO : {len(self.cto_etfs)} ETF")
+        logger.info(f"Total univers : {len(self.pea_etfs) + len(self.cto_etfs)} ETF")
+        logger.info(f"Lookback      : {lookback_period} mois")
+        logger.info(f"Source données: {self.data_source}")
+        logger.info("=" * 80)
     
     
     def fetch_data(self, tickers: List[str]) -> Dict[str, pd.DataFrame]:
@@ -337,6 +415,10 @@ class DualMomentumPortfolio:
         
         return pea_results, cto_results
 
+
+# =============================================================================
+# TESTS UNITAIRES
+# =============================================================================
 
 if __name__ == "__main__":
     # Test unitaire
