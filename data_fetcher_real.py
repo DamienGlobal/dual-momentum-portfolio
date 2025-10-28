@@ -124,7 +124,6 @@ class RealDataFetcher:
                     start=start_date.strftime('%Y-%m-%d'),
                     end=end_date.strftime('%Y-%m-%d'),
                     progress=False,
-                    show_errors=False,
                     timeout=10
                 )
                 
