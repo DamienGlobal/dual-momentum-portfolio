@@ -16,7 +16,7 @@ Filtres :
 - Tendance : Prix > SMA 10 mois (confirmation tendance)
 - Volatilité : Vol 1M < 1.5× Vol 12M (éviter actifs erratiques)
 
-Version: 2.0.0 - Production Ready (Phase 2 - Real Data)
+Version: 2.2.0 - Production Ready (Phase 2 - Real Data - Compatible data_fetcher_real v2.2.0)
 Author: GLOBAL ICON
 Date: 2025-10-28
 """
@@ -34,11 +34,11 @@ import logging
 
 # Import données avec fallback automatique MVP → Production
 try:
-    from data_fetcher_real import fetch_historical_data, get_latest_prices, validate_data
+    from data_fetcher_real import get_fetcher
     DATA_SOURCE = "REAL"
     logger = logging.getLogger(__name__)
     logger.info("=" * 80)
-    logger.info("✅ MODE PRODUCTION : Données réelles activées")
+    logger.info("✅ MODE PRODUCTION : Données réelles activées (v2.2.0)")
     logger.info("   Source : Yahoo Finance (gratuit, illimité)")
     logger.info("   Fallback : Alpha Vantage (optionnel, 25 req/jour)")
     logger.info("   Cache : Local JSON (6h validité)")
@@ -102,6 +102,64 @@ def get_data_source_info() -> Dict[str, str]:
 # CLASSE PRINCIPALE - DUAL MOMENTUM PORTFOLIO
 # =============================================================================
 
+# =============================================================================
+# FONCTIONS UTILITAIRES LOCALES (compatibilité v2.2.0)
+# =============================================================================
+
+def validate_data(df: pd.DataFrame, ticker: str) -> Tuple[bool, str]:
+    """
+    Validation données ETF
+    
+    Args:
+        df: DataFrame avec colonnes OHLCV
+        ticker: Symbole ETF
+    
+    Returns:
+        (is_valid, message)
+    """
+    # Vérifier DataFrame vide
+    if df is None or df.empty:
+        return False, f"{ticker}: DataFrame vide"
+    
+    # Vérifier colonnes requises
+    required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        return False, f"{ticker}: Colonnes manquantes: {missing_cols}"
+    
+    # Vérifier nombre de points minimum (30 jours)
+    if len(df) < 30:
+        return False, f"{ticker}: Données insuffisantes ({len(df)} jours < 30)"
+    
+    # Vérifier valeurs NaN
+    nan_count = df[required_cols].isna().sum().sum()
+    if nan_count > len(df) * 0.1:  # Max 10% NaN
+        return False, f"{ticker}: Trop de valeurs manquantes ({nan_count})"
+    
+    # Vérifier cohérence prix
+    if (df['Close'] <= 0).any():
+        return False, f"{ticker}: Prix négatifs ou nuls détectés"
+    
+    return True, f"{ticker}: OK ({len(df)} jours)"
+
+
+def get_latest_prices(data: Dict[str, pd.DataFrame]) -> Dict[str, float]:
+    """
+    Extraction derniers cours
+    
+    Args:
+        data: {ticker: DataFrame}
+    
+    Returns:
+        {ticker: dernier_prix_close}
+    """
+    latest_prices = {}
+    for ticker, df in data.items():
+        if not df.empty:
+            latest_prices[ticker] = float(df['Close'].iloc[-1])
+    return latest_prices
+
+
 class DualMomentumPortfolio:
     """
     Gestionnaire de portefeuille Dual Momentum académique.
@@ -161,14 +219,12 @@ class DualMomentumPortfolio:
         logger.info(f"📥 Récupération données {len(tickers)} ETFs "
                    f"({start_date.date()} → {end_date.date()})")
         
-        from data_fetcher_real import fetch_historical_data
 
-        data = fetch_historical_data(
+        fetcher = get_fetcher()
+        data = fetcher.fetch_portfolio_data(
             tickers=tickers,
-            start_date=start_date,
-            end_date=end_date,
-            alpha_vantage_key=st.secrets.get("alpha_vantage", {}).get("api_key"),
-            use_cache=True
+            start_date=str(start_date.date()),
+            end_date=str(end_date.date())
         )
         
         # Validation données
@@ -463,3 +519,6 @@ if __name__ == "__main__":
     print(cto_results[['ticker', 'momentum_score', 'signal', 'all_filters_pass']].head(10))
     
     print("\n✅ Tests terminés")
+
+
+
