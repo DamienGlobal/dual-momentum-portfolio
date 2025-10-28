@@ -87,77 +87,71 @@ class RealDataFetcher:
         logger.info(f"✅ RealDataFetcher initialisé (cache: {use_cache})")
     
     
-    def fetch_yahoo_finance(
-        self,
-        ticker: str,
-        start_date: datetime,
-        end_date: datetime,
-        max_retries: int = 3
-    ) -> Optional[pd.DataFrame]:
-        """
-        Récupère données Yahoo Finance avec retry automatique.
-        
-        Args:
-            ticker: Symbol ETF (ex: 'VOO', 'QQQ')
-            start_date: Date début historique
-            end_date: Date fin historique
-            max_retries: Nombre tentatives max (défaut 3)
+def fetch_yahoo_finance(
+    ticker: str,
+    start_date: datetime,
+    end_date: datetime,
+    max_retries: int = 3
+) -> Optional[pd.DataFrame]:
+    """
+    Récupère les données depuis Yahoo Finance avec retry et validation structure
+    """
+    import pandas as pd
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"📡 Yahoo Finance: {ticker} (tentative {attempt}/{max_retries})")
             
-        Returns:
-            DataFrame avec colonnes Date, Open, High, Low, Close, Volume
-            ou None si échec
-        """
-        for attempt in range(max_retries):
-            try:
-                logger.info(f"📡 Yahoo Finance: {ticker} (tentative {attempt+1}/{max_retries})")
-                
-                # Import yfinance (installation requise)
-                try:
-                    import yfinance as yf
-                except ImportError:
-                    logger.error("❌ Module yfinance non installé. Exécutez: pip install yfinance")
-                    return None
-                
-                # Téléchargement données
-                data = yf.download(
-                    ticker,
-                    start=start_date.strftime('%Y-%m-%d'),
-                    end=end_date.strftime('%Y-%m-%d'),
-                    progress=False,
-                    timeout=10
-                )
-                
-                if data.empty:
-                    logger.warning(f"⚠️ {ticker}: Aucune donnée Yahoo Finance")
-                    if attempt < max_retries - 1:
-                        time.sleep(2 ** attempt)  # Backoff exponentiel : 1s, 2s, 4s
+            # Téléchargement données (compatible toutes versions yfinance)
+            data = yf.download(
+                ticker,
+                start=start_date.strftime('%Y-%m-%d'),
+                end=end_date.strftime('%Y-%m-%d'),
+                progress=False,
+                auto_adjust=True,  # Explicite pour éviter FutureWarning
+                timeout=10
+            )
+            
+            # Cas 1 : Données vides
+            if data is None or data.empty:
+                logger.warning(f"⚠️ {ticker}: Aucune donnée retournée (tentative {attempt})")
+                if attempt < max_retries:
+                    time.sleep(2 ** attempt)  # Backoff exponentiel
                     continue
-                
-                # Reformatage colonnes standardisé
-                df = pd.DataFrame({
-                    'Date': data.index,
-                    'Open': data['Open'].values,
-                    'High': data['High'].values,
-                    'Low': data['Low'].values,
-                    'Close': data['Close'].values,
-                    'Volume': data['Volume'].values
-                }).reset_index(drop=True)
-                
-                # Validation données
-                if len(df) < 50:
-                    logger.warning(f"⚠️ {ticker}: Historique très limité ({len(df)} jours)")
-                
-                logger.info(f"✅ {ticker}: {len(df)} jours récupérés (Yahoo Finance)")
-                return df
-                
-            except Exception as e:
-                logger.error(f"❌ {ticker} tentative {attempt+1} échouée: {e}")
-                if attempt < max_retries - 1:
-                    time.sleep(2 ** attempt)
-                continue
-        
-        logger.error(f"❌ {ticker}: Toutes tentatives Yahoo Finance échouées")
-        return None
+                return None
+            
+            # Cas 2 : MultiIndex DataFrame (yfinance >=0.2.50)
+            if isinstance(data.columns, pd.MultiIndex):
+                logger.debug(f"📋 {ticker}: Conversion MultiIndex → Simple DataFrame")
+                data.columns = data.columns.droplevel(0)
+            
+            # Cas 3 : Normalisation noms colonnes
+            data.columns = [str(col).lower().replace(' ', '_') for col in data.columns]
+            
+            # Validation colonne 'close' obligatoire
+            if 'close' not in data.columns and 'adj_close' not in data.columns:
+                raise ValueError(
+                    f"Colonne 'close' manquante. Colonnes: {list(data.columns)}"
+                )
+            
+            # Renommer 'adj_close' → 'close' si nécessaire
+            if 'adj_close' in data.columns and 'close' not in data.columns:
+                data = data.rename(columns={'adj_close': 'close'})
+            
+            # Succès
+            nb_days = len(data)
+            logger.info(f"✅ {ticker}: {nb_days} jours récupérés (Yahoo Finance)")
+            return data
+            
+        except Exception as e:
+            logger.error(f"❌ {ticker} tentative {attempt} échouée: {str(e)}")
+            if attempt < max_retries:
+                time.sleep(2 ** attempt)
+            else:
+                logger.error(f"❌ {ticker}: Toutes tentatives Yahoo Finance échouées")
+                return None
+    
+    return None
     
     
     def fetch_alpha_vantage(
