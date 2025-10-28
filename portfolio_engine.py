@@ -160,7 +160,14 @@ class DualMomentumPortfolio:
         logger.info(f"📥 Récupération données {len(tickers)} ETFs "
                    f"({start_date.date()} → {end_date.date()})")
         
-        data = fetch_historical_data(tickers, start_date, end_date)
+        from data_fetcher_real import fetch_historical_data
+
+        data = fetch_historical_data(
+            tickers=tickers,
+            start_date=start_date,
+            end_date=end_date,
+            use_cache=True
+        )
         
         # Validation données
         valid_data = {}
