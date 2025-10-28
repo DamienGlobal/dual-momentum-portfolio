@@ -1,72 +1,7 @@
-# =============================================================================
-# Dual Momentum Portfolio - Dépendances Python Production
-# =============================================================================
-# Version: 2.0.0 - Production Ready (Phase 2 - Real Data)
-# Date: 2025-10-28
-# Author: GLOBAL ICON
-#
-# Changelog:
-# - v2.0.0 (2025-10-28): Upgrade yfinance 0.2.36, ajout cache optimisations
-# - v1.0.1 (2025-10-27): Fix Plotly + Kaleido
-# - v1.0.0 (2025-10-27): Version MVP initiale
-# =============================================================================
-
-# -----------------------------------------------------------------------------
-# INTERFACE UTILISATEUR
-# -----------------------------------------------------------------------------
-streamlit>=1.31.0,<2.0.0
-# Framework web pour dashboard interactif
-
-# -----------------------------------------------------------------------------
-# RÉCUPÉRATION DONNÉES FINANCIÈRES (PRODUCTION)
-# -----------------------------------------------------------------------------
-yfinance>=0.2.48
-# API Yahoo Finance - données ETF temps réel
-# v0.2.36+ : fix stabilité + support multi-threading
-
-requests>=2.31.0,<3.0.0
-# HTTP library pour APIs externes (Alpha Vantage, Finnhub)
-
-# -----------------------------------------------------------------------------
-# MANIPULATION & ANALYSE DONNÉES
-# -----------------------------------------------------------------------------
-pandas>=2.2.0,<3.0.0
-# DataFrames et séries temporelles
-
-numpy>=1.26.3,<2.0.0
-# Calculs numériques optimisés
-
-# -----------------------------------------------------------------------------
-# VISUALISATIONS INTERACTIVES
-# -----------------------------------------------------------------------------
-plotly>=5.18.0,<6.0.0
-# Graphiques interactifs (scores momentum, courbes équité)
-
-kaleido>=0.2.1,<0.3.0
-# Export statique Plotly (PNG, SVG, PDF)
-
-# -----------------------------------------------------------------------------
-# UTILITAIRES
-# -----------------------------------------------------------------------------
-python-dateutil>=2.8.2,<3.0.0
-# Parsing et manipulation dates avancées
-
-# -----------------------------------------------------------------------------
-# OPTIONNEL - PERFORMANCE & CACHE (décommentez si besoin)
-# -----------------------------------------------------------------------------
-# redis>=5.0.0,<6.0.0
-# # Cache distribué partagé multi-utilisateurs (optionnel)
-# # Installation: pip install redis
-# # Configuration: REDIS_URL dans secrets Streamlit
-
-# openpyxl>=3.1.0,<4.0.0
-# # Export Excel avancé (alternative CSV)
-# # Installation: pip install openpyxl
-
-# -----------------------------------------------------------------------------
-# DÉVELOPPEMENT & TESTS (ignoré en production)
-# -----------------------------------------------------------------------------
-# pytest>=7.4.0
-# pytest-cov>=4.1.0
-# black>=23.12.0
-# flake8>=7.0.0
+streamlit>=1.31.0
+pandas>=2.0.0
+numpy>=1.24.0
+plotly>=5.17.0
+yfinance==0.2.48
+requests>=2.31.0
+openpyxl>=3.1.0
