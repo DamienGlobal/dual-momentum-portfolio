@@ -1,273 +1,304 @@
 """
-Module hybride de récupération de données - Solution robuste anti-panne API
-Stratégie: Données locales CSV + API fallback + Cache intelligent
+Système hybride de récupération de données ETF avec données simulées académiquement réalistes.
 
-Author: GLOBAL ICON - Dual Momentum System
-Version: 1.0.0 - Hybrid Approach
-Date: 2025-10-27
+MÉTHODE ACTUELLE : Données simulées
+- Basées sur statistiques académiques réelles 2010-2024
+- Paramètres de marché réalistes (rendements, volatilités, corrélations)
+- Génération prix historiques cohérents
+
+FUTURE : Intégration multi-sources
+- Yahoo Finance (API gratuite, priorité 1)
+- Alpha Vantage (25 requêtes/jour)
+- Finnhub (limitations ETF tier gratuit)
 """
 
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
-import os
+from typing import Dict, List, Tuple
+import logging
 from pathlib import Path
+import tempfile
+
+# Configuration logging
+logger = logging.getLogger(__name__)
+
+# Répertoire data avec fallback robuste pour Streamlit Cloud
+try:
+    DATA_DIR = Path(__file__).parent / "data"
+    DATA_DIR.mkdir(exist_ok=True, parents=True)
+except (PermissionError, OSError):
+    # Fallback sur répertoire temporaire système si restrictions filesystem
+    DATA_DIR = Path(tempfile.gettempdir()) / "dual_momentum_data"
+    DATA_DIR.mkdir(exist_ok=True, parents=True)
 
 # =============================================================================
-# CONFIGURATION CHEMINS
+# PARAMÈTRES ACADÉMIQUES RÉALISTES (Statistiques 2010-2024)
 # =============================================================================
 
-DATA_DIR = Path("/home/user/dual_momentum_app/data")
-DATA_DIR.mkdir(exist_ok=True)
+SIMULATED_PARAMS = {
+    # PEA ETFs
+    "VT": {"annual_return": 0.10, "volatility": 0.16, "trend_strength": 0.65},
+    "VOO": {"annual_return": 0.12, "volatility": 0.15, "trend_strength": 0.70},
+    "VWO": {"annual_return": 0.05, "volatility": 0.25, "trend_strength": 0.45},
+    "VGK": {"annual_return": 0.08, "volatility": 0.18, "trend_strength": 0.55},
+    "EWJ": {"annual_return": 0.06, "volatility": 0.20, "trend_strength": 0.50},
+    "IWM": {"annual_return": 0.11, "volatility": 0.22, "trend_strength": 0.60},
+    "QQQ": {"annual_return": 0.18, "volatility": 0.20, "trend_strength": 0.75},
+    "XLE": {"annual_return": 0.07, "volatility": 0.28, "trend_strength": 0.40},
+    "SHY": {"annual_return": 0.02, "volatility": 0.03, "trend_strength": 0.85},
+    
+    # CTO ETFs
+    "ACWI": {"annual_return": 0.09, "volatility": 0.16, "trend_strength": 0.63},
+    "VSS": {"annual_return": 0.10, "volatility": 0.23, "trend_strength": 0.52},
+    "IEMG": {"annual_return": 0.04, "volatility": 0.26, "trend_strength": 0.43},
+    "MCHI": {"annual_return": 0.03, "volatility": 0.30, "trend_strength": 0.35},
+    "AAXJ": {"annual_return": 0.05, "volatility": 0.24, "trend_strength": 0.48},
+    "VTWO": {"annual_return": 0.10, "volatility": 0.23, "trend_strength": 0.58},
+    "ONEQ": {"annual_return": 0.17, "volatility": 0.21, "trend_strength": 0.72},
+    "MDY": {"annual_return": 0.11, "volatility": 0.19, "trend_strength": 0.62},
+    "GDX": {"annual_return": 0.00, "volatility": 0.35, "trend_strength": 0.30},
+    "IEF": {"annual_return": 0.03, "volatility": 0.06, "trend_strength": 0.78},
+    "AGG": {"annual_return": 0.03, "volatility": 0.04, "trend_strength": 0.80},
+}
 
-# =============================================================================
-# FONCTION PRINCIPALE: DONNÉES SIMULÉES RÉALISTES POUR MVP
-# =============================================================================
 
-def generate_realistic_etf_data(
+def generate_realistic_prices(
     ticker: str,
-    start_date: str = "2015-01-01",
-    end_date: str = None
+    start_date: datetime,
+    end_date: datetime
 ) -> pd.DataFrame:
     """
-    Génère données ETF réalistes basées sur paramètres académiques
+    Génère des prix historiques réalistes basés sur paramètres académiques.
     
-    ⚠️ TEMPORAIRE: Pour MVP fonctionnel en attente stabilisation API
+    Approche :
+    - Rendement annuel moyen ajusté mensuellement
+    - Volatilité mensuelle cohérente
+    - Trend strength : force tendance vs randomness
+    - Génération brownienne géométrique
     
-    Paramètres de génération basés sur statistiques historiques réelles:
-    - VOO (S&P 500): Rendement annuel ~12%, Vol ~15%
-    - QQQ (Nasdaq-100): Rendement annuel ~18%, Vol ~20%
-    - VT (World): Rendement annuel ~10%, Vol ~16%
-    - Etc.
-    
-    Parameters:
-    -----------
-    ticker : str
-        Symbole ETF
-    start_date : str
-        Date début (YYYY-MM-DD)
-    end_date : str, optional
-        Date fin (défaut: aujourd'hui)
-    
+    Args:
+        ticker: Symbol ETF
+        start_date: Date début simulation
+        end_date: Date fin simulation
+        
     Returns:
-    --------
-    pd.DataFrame
-        Colonnes: Close, Volume
+        DataFrame avec colonnes Date, Open, High, Low, Close, Volume
     """
-    
-    # Paramètres réalistes par ETF (source: recherches académiques 2010-2024)
-    ETF_PARAMS = {
-        # US Large Cap
-        'VOO': {'initial_price': 100, 'annual_return': 0.12, 'volatility': 0.15},
-        'SPY': {'initial_price': 200, 'annual_return': 0.12, 'volatility': 0.15},
-        
-        # US Tech
-        'QQQ': {'initial_price': 150, 'annual_return': 0.18, 'volatility': 0.20},
-        'ONEQ': {'initial_price': 80, 'annual_return': 0.17, 'volatility': 0.19},
-        
-        # US Small Cap
-        'IWM': {'initial_price': 120, 'annual_return': 0.10, 'volatility': 0.22},
-        'VTWO': {'initial_price': 90, 'annual_return': 0.09, 'volatility': 0.21},
-        
-        # Global
-        'VT': {'initial_price': 70, 'annual_return': 0.10, 'volatility': 0.16},
-        'ACWI': {'initial_price': 75, 'annual_return': 0.10, 'volatility': 0.16},
-        
-        # Emerging Markets
-        'VWO': {'initial_price': 45, 'annual_return': 0.05, 'volatility': 0.25},
-        'IEMG': {'initial_price': 50, 'annual_return': 0.05, 'volatility': 0.24},
-        
-        # Europe
-        'VGK': {'initial_price': 55, 'annual_return': 0.08, 'volatility': 0.18},
-        
-        # Asia
-        'EWJ': {'initial_price': 60, 'annual_return': 0.06, 'volatility': 0.20},
-        'MCHI': {'initial_price': 40, 'annual_return': 0.03, 'volatility': 0.28},
-        'AAXJ': {'initial_price': 65, 'annual_return': 0.04, 'volatility': 0.22},
-        
-        # Secteurs
-        'XLE': {'initial_price': 70, 'annual_return': 0.07, 'volatility': 0.30},
-        'MDY': {'initial_price': 300, 'annual_return': 0.11, 'volatility': 0.17},
-        'GDX': {'initial_price': 25, 'annual_return': 0.02, 'volatility': 0.35},
-        
-        # Obligations
-        'SHY': {'initial_price': 80, 'annual_return': 0.02, 'volatility': 0.03},
-        'IEF': {'initial_price': 100, 'annual_return': 0.03, 'volatility': 0.05},
-        'AGG': {'initial_price': 105, 'annual_return': 0.03, 'volatility': 0.04},
-        
-        # Small Cap Value (Vanguard)
-        'VSS': {'initial_price': 100, 'annual_return': 0.08, 'volatility': 0.23},
-    }
-    
-    # Paramètres par défaut si ticker inconnu
-    params = ETF_PARAMS.get(ticker, {
-        'initial_price': 100,
-        'annual_return': 0.10,
-        'volatility': 0.18
+    params = SIMULATED_PARAMS.get(ticker, {
+        "annual_return": 0.08,
+        "volatility": 0.18,
+        "trend_strength": 0.55
     })
     
-    # Dates
-    if end_date is None:
-        end_date = datetime.now().strftime('%Y-%m-%d')
+    # Calcul paramètres mensuels
+    monthly_return = (1 + params["annual_return"]) ** (1/12) - 1
+    monthly_vol = params["volatility"] / np.sqrt(12)
+    trend_strength = params["trend_strength"]
     
-    dates = pd.date_range(start=start_date, end=end_date, freq='B')  # Business days
+    # Génération dates business days
+    dates = pd.bdate_range(start=start_date, end=end_date, freq='D')
     n_days = len(dates)
     
-    # Génération prix avec processus Geometric Brownian Motion
-    # dS = μS dt + σS dW
-    np.random.seed(hash(ticker) % 2**32)  # Seed déterministe par ticker
+    # Prix initial (100 $ baseline)
+    initial_price = 100.0
     
-    dt = 1/252  # 1 jour ouvré
-    mu = params['annual_return']
-    sigma = params['volatility']
+    # Génération rendements journaliers
+    daily_return = monthly_return / 21  # ~21 jours trading/mois
+    daily_vol = monthly_vol / np.sqrt(21)
     
-    returns = np.random.normal(mu * dt, sigma * np.sqrt(dt), n_days)
-    price_path = params['initial_price'] * np.exp(np.cumsum(returns))
+    # Brownienne géométrique avec trend
+    random_shocks = np.random.normal(0, daily_vol, n_days)
+    trend_component = np.linspace(0, daily_return * n_days, n_days)
     
-    # Volume réaliste (millions d'unités, corrélé à volatilité)
-    base_volume = 1_000_000
-    volume = np.random.lognormal(
-        mean=np.log(base_volume),
-        sigma=0.3,
-        size=n_days
-    )
+    # Mix trend + randomness selon trend_strength
+    returns = (trend_strength * trend_component / n_days + 
+               (1 - trend_strength) * random_shocks)
     
-    # DataFrame
+    # Génération prix close
+    close_prices = initial_price * np.exp(np.cumsum(returns))
+    
+    # Génération OHLC réaliste
+    intraday_vol = daily_vol * 0.3
+    high_prices = close_prices * (1 + np.abs(np.random.normal(0, intraday_vol, n_days)))
+    low_prices = close_prices * (1 - np.abs(np.random.normal(0, intraday_vol, n_days)))
+    open_prices = np.roll(close_prices, 1)
+    open_prices[0] = initial_price
+    
+    # Volume réaliste (moyenne 1M, variabilité 30%)
+    volumes = np.random.lognormal(13.8, 0.3, n_days).astype(int)  # ~1M moyenne
+    
     df = pd.DataFrame({
-        'Close': price_path,
-        'Volume': volume.astype(int)
-    }, index=dates)
+        'Date': dates,
+        'Open': open_prices,
+        'High': high_prices,
+        'Low': low_prices,
+        'Close': close_prices,
+        'Volume': volumes
+    })
+    
+    # Validation OHLC cohérente
+    df['High'] = df[['Open', 'High', 'Close']].max(axis=1)
+    df['Low'] = df[['Open', 'Low', 'Close']].min(axis=1)
     
     return df
 
-# =============================================================================
-# CALCULS TECHNIQUES (IDENTIQUE AUX AUTRES MODULES)
-# =============================================================================
 
-def calculate_returns(
-    prices: pd.DataFrame,
-    periods: List[int] = [21, 63, 126]
-) -> pd.DataFrame:
-    """Calcule rendements sur différentes périodes"""
-    returns_df = pd.DataFrame(index=prices.index)
-    
-    for period in periods:
-        col_name = f'R_{period}'
-        returns_df[col_name] = (prices['Close'] / prices['Close'].shift(period) - 1) * 100
-    
-    return returns_df
-
-def calculate_sma(prices: pd.DataFrame, window: int = 200) -> pd.Series:
-    """Calcule moyenne mobile simple"""
-    return prices['Close'].rolling(window=window, min_periods=window).mean()
-
-def calculate_volatility(prices: pd.DataFrame, window: int = 21) -> pd.Series:
-    """Calcule volatilité annualisée glissante"""
-    daily_returns = prices['Close'].pct_change()
-    rolling_std = daily_returns.rolling(window=window, min_periods=window).std()
-    return rolling_std * np.sqrt(252) * 100
-
-# =============================================================================
-# PIPELINE COMPLET
-# =============================================================================
-
-def get_etf_complete_data(
-    ticker: str,
-    start_date: str = None,
-    end_date: str = None
-) -> Optional[pd.DataFrame]:
-    """
-    Pipeline complet: récupération + calculs techniques
-    
-    Utilise données simulées réalistes pour MVP
-    """
-    
-    # Dates par défaut
-    if start_date is None:
-        start_date = "2015-01-01"
-    if end_date is None:
-        end_date = datetime.now().strftime('%Y-%m-%d')
-    
-    print(f"📊 {ticker}: Génération données simulées réalistes...")
-    
-    # 1. RÉCUPÉRER PRIX (simulés)
-    prices = generate_realistic_etf_data(ticker, start_date, end_date)
-    
-    # 2. CALCULS TECHNIQUES
-    result = prices.copy()
-    
-    # Rendements 1M, 3M, 6M
-    returns = calculate_returns(prices, periods=[21, 63, 126])
-    result = result.join(returns)
-    
-    # Moyenne mobile 200 jours (≈ 10 mois)
-    result['SMA_200'] = calculate_sma(prices, window=200)
-    
-    # Volatilité 21 jours (≈ 1 mois)
-    result['Vol_21'] = calculate_volatility(prices, window=21)
-    
-    # 3. NETTOYER VALEURS MANQUANTES
-    result = result.dropna()
-    
-    print(f"✅ {ticker}: {len(result)} jours générés (de {result.index.min().date()} à {result.index.max().date()})")
-    print(f"   Prix actuel: ${result['Close'].iloc[-1]:.2f}")
-    print(f"   Rendements: 1M={result['R_21'].iloc[-1]:+.2f}%, 3M={result['R_63'].iloc[-1]:+.2f}%, 6M={result['R_126'].iloc[-1]:+.2f}%")
-    
-    return result
-
-def fetch_multiple_etfs(
+def fetch_historical_data(
     tickers: List[str],
-    start_date: str = None,
-    end_date: str = None
+    start_date: datetime,
+    end_date: datetime
 ) -> Dict[str, pd.DataFrame]:
     """
-    Récupère données pour liste d'ETFs
+    Récupère données historiques pour liste de tickers.
+    
+    MÉTHODE ACTUELLE : Données simulées académiquement réalistes
+    FUTURE : Multi-sources (Yahoo Finance → Alpha Vantage → Finnhub)
+    
+    Args:
+        tickers: Liste symbols ETF
+        start_date: Date début
+        end_date: Date fin
+        
+    Returns:
+        Dict {ticker: DataFrame} avec données OHLCV
     """
+    data = {}
     
-    results = {}
-    
-    print("=" * 80)
-    print(f"RÉCUPÉRATION DONNÉES POUR {len(tickers)} ETFs (MODE SIMULÉ)")
-    print("=" * 80)
-    print("\n⚠️ NOTE: Données simulées réalistes basées sur statistiques historiques")
-    print("         académiques. Pour production: remplacer par API réelle.\n")
+    logger.info(f"Génération données simulées pour {len(tickers)} ETFs "
+                f"({start_date.date()} → {end_date.date()})")
     
     for ticker in tickers:
-        data = get_etf_complete_data(ticker, start_date, end_date)
-        if data is not None:
-            results[ticker] = data
+        try:
+            df = generate_realistic_prices(ticker, start_date, end_date)
+            
+            if df.empty:
+                logger.warning(f"❌ {ticker}: DataFrame vide")
+                continue
+                
+            data[ticker] = df
+            logger.info(f"✅ {ticker}: {len(df)} jours, "
+                       f"Prix final ${df['Close'].iloc[-1]:.2f}")
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur {ticker}: {e}")
+            continue
     
-    print("=" * 80)
-    print(f"RÉSULTATS: {len(results)}/{len(tickers)} ETFs générés avec succès")
-    print("=" * 80)
+    logger.info(f"📊 Données récupérées : {len(data)}/{len(tickers)} ETFs")
+    return data
+
+
+def get_latest_prices(tickers: List[str]) -> Dict[str, float]:
+    """
+    Récupère prix actuels pour liste de tickers.
     
-    return results
+    Args:
+        tickers: Liste symbols ETF
+        
+    Returns:
+        Dict {ticker: prix_actuel}
+    """
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=5)  # 5 derniers jours
+    
+    data = fetch_historical_data(tickers, start_date, end_date)
+    
+    prices = {}
+    for ticker, df in data.items():
+        if not df.empty:
+            prices[ticker] = df['Close'].iloc[-1]
+    
+    return prices
+
+
+def validate_data(df: pd.DataFrame, ticker: str) -> Tuple[bool, str]:
+    """
+    Valide qualité données ETF.
+    
+    Vérifications :
+    - DataFrame non vide
+    - Colonnes requises présentes
+    - Prix strictement positifs
+    - OHLC cohérente (Low ≤ Close ≤ High)
+    - Pas de valeurs NaN excessives
+    
+    Args:
+        df: DataFrame prix historiques
+        ticker: Symbol ETF
+        
+    Returns:
+        (is_valid, message)
+    """
+    if df.empty:
+        return False, f"{ticker}: DataFrame vide"
+    
+    required_cols = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        return False, f"{ticker}: Colonnes manquantes {missing_cols}"
+    
+    # Vérification prix positifs
+    if (df['Close'] <= 0).any():
+        return False, f"{ticker}: Prix négatifs ou nuls détectés"
+    
+    # Vérification OHLC cohérente
+    invalid_ohlc = (
+        (df['Low'] > df['Close']) | 
+        (df['Close'] > df['High']) |
+        (df['Low'] > df['Open']) |
+        (df['Open'] > df['High'])
+    ).sum()
+    
+    if invalid_ohlc > 0:
+        return False, f"{ticker}: {invalid_ohlc} lignes OHLC incohérentes"
+    
+    # Vérification NaN
+    nan_pct = df['Close'].isna().sum() / len(df) * 100
+    if nan_pct > 10:
+        return False, f"{ticker}: {nan_pct:.1f}% valeurs manquantes"
+    
+    return True, f"{ticker}: ✅ Données valides ({len(df)} jours)"
+
 
 # =============================================================================
-# TESTS
+# FUTURE : INTÉGRATION MULTI-SOURCES
 # =============================================================================
+
+def fetch_yahoo_finance(tickers, start_date, end_date):
+    """Placeholder pour intégration Yahoo Finance future."""
+    raise NotImplementedError("Yahoo Finance API actuellement instable (2025-10-27)")
+
+
+def fetch_alpha_vantage(ticker, start_date, end_date):
+    """Placeholder pour intégration Alpha Vantage future."""
+    raise NotImplementedError("Alpha Vantage : limite 25 requêtes/jour")
+
+
+def fetch_finnhub(ticker, start_date, end_date):
+    """Placeholder pour intégration Finnhub future."""
+    raise NotImplementedError("Finnhub Free tier : ETFs bloqués")
+
 
 if __name__ == "__main__":
-    print("\n" + "=" * 80)
-    print("TEST MODULE DATA_FETCHER_HYBRID (DONNÉES SIMULÉES)")
-    print("=" * 80)
+    # Test unitaire module
+    logging.basicConfig(level=logging.INFO)
     
-    # Test 1: ETF unique
-    print("\n[TEST 1] Génération VOO (S&P 500)...")
-    data_voo = get_etf_complete_data("VOO")
+    test_tickers = ["VOO", "QQQ", "VT"]
+    end = datetime.now()
+    start = end - timedelta(days=365)
     
-    if data_voo is not None:
-        print(f"\n✅ Test réussi")
-        print(f"   Colonnes: {list(data_voo.columns)}")
-        print(f"   Dernières données:")
-        print(data_voo.tail(3))
+    print("🧪 Test fetch_historical_data...")
+    data = fetch_historical_data(test_tickers, start, end)
     
-    # Test 2: Multiple ETFs
-    print("\n[TEST 2] Génération multiple ETFs...")
-    test_tickers = ["VOO", "QQQ", "VT", "IWM"]
-    results = fetch_multiple_etfs(test_tickers)
+    print(f"\n📊 Résultats : {len(data)}/{len(test_tickers)} ETFs")
+    for ticker, df in data.items():
+        is_valid, msg = validate_data(df, ticker)
+        print(f"  {msg}")
+        print(f"  Prix : ${df['Close'].iloc[0]:.2f} → ${df['Close'].iloc[-1]:.2f}")
     
-    print(f"\n✅ {len(results)} ETFs générés")
+    print("\n🧪 Test get_latest_prices...")
+    prices = get_latest_prices(test_tickers)
+    for ticker, price in prices.items():
+        print(f"  {ticker}: ${price:.2f}")
     
-    print("\n" + "=" * 80)
+    print("\n✅ Tests terminés")
