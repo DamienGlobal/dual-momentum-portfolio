@@ -20,7 +20,7 @@ streamlit>=1.31.0,<2.0.0
 # -----------------------------------------------------------------------------
 # RÉCUPÉRATION DONNÉES FINANCIÈRES (PRODUCTION)
 # -----------------------------------------------------------------------------
-yfinance>=0.2.36,<0.3.0
+yfinance>=0.2.48
 # API Yahoo Finance - données ETF temps réel
 # v0.2.36+ : fix stabilité + support multi-threading
 
