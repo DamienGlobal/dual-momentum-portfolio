@@ -16,7 +16,7 @@ import time
 
 # Modules internes
 from portfolio_engine import DualMomentumPortfolio
-from config_working import PEA_ETFS_WORKING, CTO_ETFS_WORKING
+from config_working import PEA_ETFS, CTO_ETFS
 
 # =============================================================================
 # CONFIGURATION PAGE
@@ -110,7 +110,7 @@ with st.sidebar:
     st.subheader("📍 Positions Actuelles")
     
     # PEA
-    pea_tickers = list(PEA_ETFS_WORKING.keys())
+    pea_tickers = list(.keys())
     current_pea = st.selectbox(
         "PEA (Position actuelle)",
         options=["Aucune"] + pea_tickers,
@@ -119,7 +119,7 @@ with st.sidebar:
     )
     
     # CTO
-    cto_tickers = list(CTO_ETFS_WORKING.keys())
+    cto_tickers = list(CTO_ETFS.keys())
     current_cto = st.selectbox(
         "CTO (Position actuelle)",
         options=["Aucune"] + cto_tickers,
@@ -236,8 +236,8 @@ if analyse_button:
         status_text.text("📊 Génération signaux trading...")
         progress_bar.progress(90)
         
-        current_pea_ticker = None if current_pea == "Aucune" else PEA_ETFS_WORKING[current_pea]['ticker_yahoo']
-        current_cto_ticker = None if current_cto == "Aucune" else CTO_ETFS_WORKING[current_cto]['ticker_yahoo']
+        current_pea_ticker = None if current_pea == "Aucune" else PEA_ETFS[current_pea]['ticker_yahoo']
+        current_cto_ticker = None if current_cto == "Aucune" else CTO_ETFS[current_cto]['ticker_yahoo']
         
         report = portfolio.run_full_analysis(
             current_pea_ticker=current_pea_ticker,
