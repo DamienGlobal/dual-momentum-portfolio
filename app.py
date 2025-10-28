@@ -19,6 +19,26 @@ from portfolio_engine import DualMomentumPortfolio
 from config_working import PEA_ETFS, CTO_ETFS
 
 # =============================================================================
+# INDICATEUR SOURCE DONNÉES
+# =============================================================================
+
+with st.sidebar:
+    st.markdown("---")
+    
+    # Import pour vérifier source
+    try:
+        from portfolio_engine import DATA_SOURCE
+        
+        if DATA_SOURCE == "REAL":
+            st.success("📡 **Données Réelles** (Yahoo Finance)")
+            st.caption("✅ Prix actualisés en temps réel")
+        else:
+            st.warning("🧪 **Données Simulées** (MVP)")
+            st.caption("⚠️ Paramètres académiques 2010-2024")
+    except:
+        st.info("📊 Source données : Non détectée")
+
+# =============================================================================
 # CONFIGURATION PAGE
 # =============================================================================
 
