@@ -1,158 +1,195 @@
 """
-Système de récupération données ETF réelles - Production Ready
-
-Architecture multi-sources avec fallback automatique :
-1. Cache local (6h validité) - Instant
-2. Yahoo Finance (gratuit, illimité) - Priorité
-3. Alpha Vantage (25 req/jour) - Fallback
-4. Finnhub (limité ETF) - Fallback ultime
-
-Features :
-- Retry automatique avec backoff exponentiel
-- Cache JSON local persistant
-- Validation qualité données
-- Logging détaillé pour debugging
-- Compatible drop-in avec data_fetcher_hybrid
-
-Author: GLOBAL ICON
-Version: 2.0.0 - Production Ready
-Date: 2025-10-28
+Module de récupération de données réelles depuis Yahoo Finance et Alpha Vantage
+Version: 2.1.0 - Compatible yfinance 0.2.48
 """
 
-import pandas as pd
-import numpy as np
+import logging
+import time
+import json
+import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
-import logging
-from pathlib import Path
-import json
-import time
+import pandas as pd
+import numpy as np
+import yfinance as yf
 import requests
 
 # Configuration logging
 logger = logging.getLogger(__name__)
 
-# =============================================================================
-# CONFIGURATION CACHE
-# =============================================================================
+# Configuration cache
+CACHE_DIR = "/tmp/etf_cache"
+CACHE_DURATION_HOURS = 6
 
-try:
-    CACHE_DIR = Path(__file__).parent / "cache"
-    CACHE_DIR.mkdir(exist_ok=True, parents=True)
-except (PermissionError, OSError):
-    import tempfile
-    CACHE_DIR = Path(tempfile.gettempdir()) / "dual_momentum_cache"
-    CACHE_DIR.mkdir(exist_ok=True, parents=True)
-
-CACHE_EXPIRY_HOURS = 6  # Données valides 6 heures
-
-
-# =============================================================================
-# CLASSE PRINCIPALE
-# =============================================================================
 
 class RealDataFetcher:
     """
-    Gestionnaire récupération données réelles multi-sources.
-    
-    Attributes:
-        use_cache: Active cache local
-        alpha_vantage_key: Clé API Alpha Vantage (optionnel)
-        finnhub_key: Clé API Finnhub (optionnel)
-        av_requests_today: Compteur requêtes Alpha Vantage
+    Classe pour récupérer des données réelles depuis Yahoo Finance et Alpha Vantage
+    avec système de cache et retry automatique
     """
     
-    def __init__(
-        self,
-        use_cache: bool = True,
-        alpha_vantage_key: Optional[str] = None,
-        finnhub_key: Optional[str] = None
-    ):
+    def __init__(self, alpha_vantage_key: Optional[str] = None, use_cache: bool = True):
         """
-        Initialise fetcher données réelles.
+        Initialise le fetcher avec clé API optionnelle et cache
         
         Args:
-            use_cache: Utiliser cache local (recommandé True)
-            alpha_vantage_key: Clé API Alpha Vantage (optionnel)
-            finnhub_key: Clé API Finnhub (optionnel)
+            alpha_vantage_key: Clé API Alpha Vantage (fallback)
+            use_cache: Activer le cache local (défaut: True)
         """
-        self.use_cache = use_cache
         self.alpha_vantage_key = alpha_vantage_key
-        self.finnhub_key = finnhub_key
+        self.use_cache = use_cache
         
-        # Compteurs requêtes (limites APIs)
-        self.av_requests_today = 0
-        self.av_max_requests = 25  # Limite Alpha Vantage gratuit
+        # Créer répertoire cache si nécessaire
+        if self.use_cache:
+            os.makedirs(CACHE_DIR, exist_ok=True)
         
-        logger.info(f"✅ RealDataFetcher initialisé (cache: {use_cache})")
+        logger.info(f"✅ RealDataFetcher initialisé (cache: {self.use_cache})")
     
+    def get_cache_path(self, ticker: str, start_date: datetime, end_date: datetime) -> str:
+        """Génère le chemin du fichier cache pour un ticker et une période"""
+        cache_key = f"{ticker}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.json"
+        return os.path.join(CACHE_DIR, cache_key)
     
-def fetch_yahoo_finance(
-    ticker: str,
-    start_date: datetime,
-    end_date: datetime,
-    max_retries: int = 3
-) -> Optional[pd.DataFrame]:
-    """
-    Récupère les données depuis Yahoo Finance avec retry et validation structure
-    """
-    import pandas as pd
-    
-    for attempt in range(1, max_retries + 1):
+    def load_from_cache(self, ticker: str, start_date: datetime, end_date: datetime) -> Optional[pd.DataFrame]:
+        """
+        Charge les données depuis le cache si disponibles et valides
+        
+        Returns:
+            DataFrame ou None si cache inexistant/expiré
+        """
+        if not self.use_cache:
+            return None
+        
+        cache_path = self.get_cache_path(ticker, start_date, end_date)
+        
         try:
-            logger.info(f"📡 Yahoo Finance: {ticker} (tentative {attempt}/{max_retries})")
-            
-            # Téléchargement données (compatible toutes versions yfinance)
-            data = yf.download(
-                ticker,
-                start=start_date.strftime('%Y-%m-%d'),
-                end=end_date.strftime('%Y-%m-%d'),
-                progress=False,
-                auto_adjust=True,  # Explicite pour éviter FutureWarning
-                timeout=10
-            )
-            
-            # Cas 1 : Données vides
-            if data is None or data.empty:
-                logger.warning(f"⚠️ {ticker}: Aucune donnée retournée (tentative {attempt})")
-                if attempt < max_retries:
-                    time.sleep(2 ** attempt)  # Backoff exponentiel
-                    continue
+            if not os.path.exists(cache_path):
                 return None
             
-            # Cas 2 : MultiIndex DataFrame (yfinance >=0.2.50)
-            if isinstance(data.columns, pd.MultiIndex):
-                logger.debug(f"📋 {ticker}: Conversion MultiIndex → Simple DataFrame")
-                data.columns = data.columns.droplevel(0)
+            # Vérifier âge du cache
+            cache_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(cache_path))
+            if cache_age > timedelta(hours=CACHE_DURATION_HOURS):
+                logger.debug(f"💾 {ticker}: Cache expiré ({cache_age.total_seconds()/3600:.1f}h)")
+                os.remove(cache_path)
+                return None
             
-            # Cas 3 : Normalisation noms colonnes
-            data.columns = [str(col).lower().replace(' ', '_') for col in data.columns]
+            # Charger données
+            with open(cache_path, 'r') as f:
+                data_dict = json.load(f)
             
-            # Validation colonne 'close' obligatoire
-            if 'close' not in data.columns and 'adj_close' not in data.columns:
-                raise ValueError(
-                    f"Colonne 'close' manquante. Colonnes: {list(data.columns)}"
-                )
+            df = pd.DataFrame(data_dict['data'])
+            df.index = pd.to_datetime(df.index)
             
-            # Renommer 'adj_close' → 'close' si nécessaire
-            if 'adj_close' in data.columns and 'close' not in data.columns:
-                data = data.rename(columns={'adj_close': 'close'})
-            
-            # Succès
-            nb_days = len(data)
-            logger.info(f"✅ {ticker}: {nb_days} jours récupérés (Yahoo Finance)")
-            return data
+            logger.info(f"💾 {ticker}: {len(df)} jours chargés depuis cache")
+            return df
             
         except Exception as e:
-            logger.error(f"❌ {ticker} tentative {attempt} échouée: {str(e)}")
-            if attempt < max_retries:
-                time.sleep(2 ** attempt)
-            else:
-                logger.error(f"❌ {ticker}: Toutes tentatives Yahoo Finance échouées")
-                return None
+            logger.warning(f"⚠️ {ticker}: Erreur lecture cache: {str(e)}")
+            return None
     
-    return None
+    def save_to_cache(self, ticker: str, start_date: datetime, end_date: datetime, data: pd.DataFrame):
+        """Sauvegarde les données dans le cache"""
+        if not self.use_cache or data is None or data.empty:
+            return
+        
+        cache_path = self.get_cache_path(ticker, start_date, end_date)
+        
+        try:
+            data_dict = {
+                'ticker': ticker,
+                'start_date': start_date.isoformat(),
+                'end_date': end_date.isoformat(),
+                'data': data.reset_index().to_dict(orient='list')
+            }
+            
+            with open(cache_path, 'w') as f:
+                json.dump(data_dict, f)
+            
+            logger.debug(f"💾 {ticker}: Données sauvegardées en cache")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ {ticker}: Erreur sauvegarde cache: {str(e)}")
     
+    def fetch_yahoo_finance(
+        self,
+        ticker: str,
+        start_date: datetime,
+        end_date: datetime,
+        max_retries: int = 3
+    ) -> Optional[pd.DataFrame]:
+        """
+        Récupère les données depuis Yahoo Finance avec retry et validation structure
+        
+        Args:
+            ticker: Symbole ETF (ex: 'VT')
+            start_date: Date début
+            end_date: Date fin
+            max_retries: Nombre de tentatives (défaut: 3)
+        
+        Returns:
+            DataFrame avec colonnes ['close', 'volume', ...] ou None
+        """
+        for attempt in range(1, max_retries + 1):
+            try:
+                logger.info(f"📡 Yahoo Finance: {ticker} (tentative {attempt}/{max_retries})")
+                
+                # Téléchargement données (compatible yfinance 0.2.48)
+                data = yf.download(
+                    ticker,
+                    start=start_date.strftime('%Y-%m-%d'),
+                    end=end_date.strftime('%Y-%m-%d'),
+                    progress=False,
+                    auto_adjust=True,
+                    timeout=10
+                )
+                
+                # Cas 1 : Données vides
+                if data is None or data.empty:
+                    logger.warning(f"⚠️ {ticker}: Aucune donnée retournée (tentative {attempt})")
+                    if attempt < max_retries:
+                        time.sleep(2 ** attempt)
+                        continue
+                    return None
+                
+                # Cas 2 : MultiIndex DataFrame (yfinance >=0.2.50 - sécurité)
+                if isinstance(data.columns, pd.MultiIndex):
+                    logger.debug(f"📋 {ticker}: Conversion MultiIndex → Simple DataFrame")
+                    data.columns = data.columns.droplevel(0)
+                
+                # Cas 3 : Normalisation noms colonnes
+                data.columns = [str(col).lower().replace(' ', '_') for col in data.columns]
+                
+                # Validation colonne 'close' obligatoire
+                if 'close' not in data.columns and 'adj_close' not in data.columns:
+                    raise ValueError(
+                        f"Colonne 'close' manquante. Colonnes: {list(data.columns)}"
+                    )
+                
+                # Renommer 'adj_close' → 'close' si nécessaire
+                if 'adj_close' in data.columns and 'close' not in data.columns:
+                    data = data.rename(columns={'adj_close': 'close'})
+                
+                # Nettoyage NaN
+                data = data.dropna(subset=['close'])
+                
+                if data.empty:
+                    logger.warning(f"⚠️ {ticker}: Données vides après nettoyage")
+                    return None
+                
+                # Succès
+                nb_days = len(data)
+                logger.info(f"✅ {ticker}: {nb_days} jours récupérés (Yahoo Finance)")
+                return data
+                
+            except Exception as e:
+                logger.error(f"❌ {ticker} tentative {attempt} échouée: {str(e)}")
+                if attempt < max_retries:
+                    time.sleep(2 ** attempt)
+                else:
+                    logger.error(f"❌ {ticker}: Toutes tentatives Yahoo Finance échouées")
+                    return None
+        
+        return None
     
     def fetch_alpha_vantage(
         self,
@@ -161,24 +198,18 @@ def fetch_yahoo_finance(
         end_date: datetime
     ) -> Optional[pd.DataFrame]:
         """
-        Récupère données Alpha Vantage (fallback Yahoo Finance).
-        
-        Limite gratuite : 25 requêtes/jour
+        Récupère les données depuis Alpha Vantage (fallback)
         
         Args:
-            ticker: Symbol ETF
+            ticker: Symbole ETF
             start_date: Date début
             end_date: Date fin
-            
+        
         Returns:
-            DataFrame OHLCV ou None
+            DataFrame ou None si échec
         """
         if not self.alpha_vantage_key:
-            logger.warning("⚠️ Alpha Vantage: Clé API manquante (ignoré)")
-            return None
-        
-        if self.av_requests_today >= self.av_max_requests:
-            logger.warning(f"⚠️ Alpha Vantage: Limite quotidienne atteinte ({self.av_max_requests})")
+            logger.debug(f"⚠️ {ticker}: Alpha Vantage désactivé (pas de clé API)")
             return None
         
         try:
@@ -193,430 +224,277 @@ def fetch_yahoo_finance(
             }
             
             response = requests.get(url, params=params, timeout=15)
-            data = response.json()
+            response.raise_for_status()
             
-            # Vérification réponse valide
-            if 'Time Series (Daily)' not in data:
-                error_msg = data.get('Note', data.get('Error Message', 'Réponse invalide'))
-                logger.warning(f"⚠️ {ticker}: Alpha Vantage - {error_msg}")
+            data_json = response.json()
+            
+            # Vérifier erreurs API
+            if 'Error Message' in data_json:
+                logger.error(f"❌ {ticker}: {data_json['Error Message']}")
                 return None
             
-            # Conversion DataFrame
-            time_series = data['Time Series (Daily)']
-            records = []
+            if 'Note' in data_json:
+                logger.warning(f"⚠️ {ticker}: Limite API atteinte")
+                return None
             
-            for date_str, values in time_series.items():
-                try:
-                    date = pd.to_datetime(date_str)
-                    
-                    records.append({
-                        'Date': date,
-                        'Open': float(values['1. open']),
-                        'High': float(values['2. high']),
-                        'Low': float(values['3. low']),
-                        'Close': float(values['4. close']),
-                        'Volume': int(values['6. volume'])
-                    })
-                except (KeyError, ValueError) as e:
-                    logger.warning(f"⚠️ {ticker}: Erreur parsing date {date_str}: {e}")
-                    continue
+            # Parser données
+            time_series = data_json.get('Time Series (Daily)', {})
+            if not time_series:
+                logger.error(f"❌ {ticker}: Pas de données dans la réponse")
+                return None
             
-            df = pd.DataFrame(records)
+            # Convertir en DataFrame
+            df = pd.DataFrame.from_dict(time_series, orient='index')
+            df.index = pd.to_datetime(df.index)
+            df = df.sort_index()
             
-            # Filtrage période demandée
-            df = df[(df['Date'] >= start_date) & (df['Date'] <= end_date)]
-            df = df.sort_values('Date').reset_index(drop=True)
+            # Renommer colonnes
+            df.columns = [col.split('. ')[1].lower().replace(' ', '_') for col in df.columns]
+            df = df.rename(columns={'adjusted_close': 'close'})
             
-            self.av_requests_today += 1
-            logger.info(f"✅ {ticker}: {len(df)} jours (Alpha Vantage, {self.av_requests_today}/{self.av_max_requests})")
+            # Convertir en float
+            for col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
             
+            # Filtrer période
+            df = df[(df.index >= start_date) & (df.index <= end_date)]
+            
+            if df.empty:
+                logger.warning(f"⚠️ {ticker}: Aucune donnée dans la période")
+                return None
+            
+            logger.info(f"✅ {ticker}: {len(df)} jours récupérés (Alpha Vantage)")
             return df
             
-        except requests.Timeout:
-            logger.error(f"❌ {ticker}: Timeout Alpha Vantage")
-            return None
         except Exception as e:
-            logger.error(f"❌ {ticker} Alpha Vantage: {e}")
+            logger.error(f"❌ {ticker}: Erreur Alpha Vantage: {str(e)}")
             return None
     
-    
-    def get_from_cache(
+    def fetch_single_ticker(
         self,
         ticker: str,
         start_date: datetime,
         end_date: datetime
     ) -> Optional[pd.DataFrame]:
         """
-        Récupère données depuis cache local si valides.
+        Récupère les données pour un ticker avec fallback automatique
+        
+        Ordre des sources :
+        1. Cache local (si activé)
+        2. Yahoo Finance (source principale)
+        3. Alpha Vantage (fallback si clé API fournie)
         
         Args:
-            ticker: Symbol ETF
-            start_date: Date début demandée
-            end_date: Date fin demandée
-            
+            ticker: Symbole ETF
+            start_date: Date début
+            end_date: Date fin
+        
         Returns:
-            DataFrame depuis cache ou None si expiré/absent
+            DataFrame ou None si toutes sources échouent
         """
-        if not self.use_cache:
-            return None
+        # Tentative 1 : Cache
+        cached_data = self.load_from_cache(ticker, start_date, end_date)
+        if cached_data is not None:
+            return cached_data
         
-        cache_file = CACHE_DIR / f"{ticker}.json"
+        # Tentative 2 : Yahoo Finance
+        data = self.fetch_yahoo_finance(ticker, start_date, end_date)
+        if data is not None:
+            self.save_to_cache(ticker, start_date, end_date, data)
+            return data
         
-        if not cache_file.exists():
-            return None
+        # Tentative 3 : Alpha Vantage
+        logger.warning(f"⚠️ {ticker}: Yahoo Finance échoué, tentative Alpha Vantage...")
+        data = self.fetch_alpha_vantage(ticker, start_date, end_date)
+        if data is not None:
+            self.save_to_cache(ticker, start_date, end_date, data)
+            return data
         
-        try:
-            with open(cache_file, 'r') as f:
-                cache_data = json.load(f)
-            
-            # Vérification expiration
-            cached_time = datetime.fromisoformat(cache_data['timestamp'])
-            age_hours = (datetime.now() - cached_time).total_seconds() / 3600
-            
-            if age_hours > CACHE_EXPIRY_HOURS:
-                logger.info(f"⏰ {ticker}: Cache expiré ({age_hours:.1f}h > {CACHE_EXPIRY_HOURS}h)")
-                return None
-            
-            # Reconstruction DataFrame
-            df = pd.DataFrame(cache_data['data'])
-            df['Date'] = pd.to_datetime(df['Date'])
-            
-            # Vérification couverture période
-            cache_start = df['Date'].min()
-            cache_end = df['Date'].max()
-            
-            if start_date < cache_start or end_date > cache_end:
-                logger.info(f"⏰ {ticker}: Cache incomplet (période demandée hors cache)")
-                return None
-            
-            # Filtrage période demandée
-            df = df[(df['Date'] >= start_date) & (df['Date'] <= end_date)]
-            
-            logger.info(f"💾 {ticker}: {len(df)} jours depuis cache ({age_hours:.1f}h)")
-            return df
-            
-        except Exception as e:
-            logger.error(f"❌ {ticker} lecture cache: {e}")
-            return None
+        logger.error(f"❌ {ticker}: ÉCHEC - Toutes sources ont échoué")
+        return None
     
-    
-    def save_to_cache(self, ticker: str, df: pd.DataFrame):
-        """
-        Sauvegarde données dans cache local.
-        
-        Args:
-            ticker: Symbol ETF
-            df: DataFrame à sauvegarder
-        """
-        if not self.use_cache or df.empty:
-            return
-        
-        try:
-            cache_file = CACHE_DIR / f"{ticker}.json"
-            
-            # Conversion datetime en string pour JSON
-            data_records = df.to_dict(orient='records')
-            for record in data_records:
-                if isinstance(record['Date'], pd.Timestamp):
-                    record['Date'] = record['Date'].isoformat()
-            
-            cache_data = {
-                'timestamp': datetime.now().isoformat(),
-                'ticker': ticker,
-                'rows': len(df),
-                'start_date': df['Date'].min().isoformat() if len(df) > 0 else None,
-                'end_date': df['Date'].max().isoformat() if len(df) > 0 else None,
-                'data': data_records
-            }
-            
-            with open(cache_file, 'w') as f:
-                json.dump(cache_data, f, indent=2)
-            
-            logger.info(f"💾 {ticker}: Sauvegardé en cache ({len(df)} jours)")
-            
-        except Exception as e:
-            logger.error(f"❌ {ticker} écriture cache: {e}")
-    
-    
-    def validate_data(self, ticker: str, df: pd.DataFrame) -> Tuple[bool, str]:
-        """
-        Valide qualité données récupérées.
-        
-        Vérifications :
-        - DataFrame non vide
-        - Colonnes requises présentes
-        - Prix strictement positifs
-        - OHLC cohérente (Low ≤ Close ≤ High)
-        - Pas de valeurs NaN excessives
-        
-        Args:
-            ticker: Symbol ETF
-            df: DataFrame à valider
-            
-        Returns:
-            (is_valid, message)
-        """
-        if df.empty:
-            return False, f"{ticker}: DataFrame vide"
-        
-        # Colonnes requises
-        required_cols = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
-        missing_cols = [col for col in required_cols if col not in df.columns]
-        if missing_cols:
-            return False, f"{ticker}: Colonnes manquantes {missing_cols}"
-        
-        # Prix positifs
-        if (df['Close'] <= 0).any():
-            invalid_count = (df['Close'] <= 0).sum()
-            return False, f"{ticker}: {invalid_count} prix négatifs/nuls"
-        
-        # OHLC cohérente
-        invalid_ohlc = (
-            (df['Low'] > df['Close']) | 
-            (df['Close'] > df['High']) |
-            (df['Low'] > df['Open']) |
-            (df['Open'] > df['High'])
-        ).sum()
-        
-        if invalid_ohlc > len(df) * 0.05:  # Tolérance 5%
-            return False, f"{ticker}: {invalid_ohlc} lignes OHLC incohérentes (>{len(df)*0.05:.0f})"
-        
-        # Valeurs manquantes
-        nan_pct = df['Close'].isna().sum() / len(df) * 100
-        if nan_pct > 10:
-            return False, f"{ticker}: {nan_pct:.1f}% valeurs manquantes (>10%)"
-        
-        return True, f"{ticker}: ✅ Données valides ({len(df)} jours)"
-    
-    
-    def fetch_historical_data(
+    def fetch_multiple_tickers(
         self,
         tickers: List[str],
         start_date: datetime,
         end_date: datetime
     ) -> Dict[str, pd.DataFrame]:
         """
-        Récupère données historiques avec fallback automatique.
-        
-        Ordre tentatives pour chaque ticker :
-        1. Cache local (si valide et complet)
-        2. Yahoo Finance (priorité, gratuit illimité)
-        3. Alpha Vantage (fallback, 25 req/jour)
-        4. Échec → ticker exclu
+        Récupère les données pour plusieurs tickers
         
         Args:
-            tickers: Liste symbols ETF (ex: ['VOO', 'QQQ', 'VT'])
-            start_date: Date début historique
-            end_date: Date fin historique
-            
+            tickers: Liste symboles ETF
+            start_date: Date début
+            end_date: Date fin
+        
         Returns:
-            Dict {ticker: DataFrame} avec données valides uniquement
+            Dictionnaire {ticker: DataFrame} (tickers échoués exclus)
         """
-        data = {}
+        logger.info("="*80)
+        logger.info("📡 RÉCUPÉRATION DONNÉES RÉELLES")
+        logger.info(f"Période: {start_date.strftime('%Y-%m-%d')} → {end_date.strftime('%Y-%m-%d')}")
+        logger.info(f"Tickers: {len(tickers)} ETF")
+        logger.info("="*80)
+        
+        results = {}
         failed_tickers = []
         
-        logger.info("=" * 80)
-        logger.info(f"📡 RÉCUPÉRATION DONNÉES RÉELLES")
-        logger.info(f"Période: {start_date.date()} → {end_date.date()}")
-        logger.info(f"Tickers: {len(tickers)} ETF")
-        logger.info("=" * 80)
-        
-        for idx, ticker in enumerate(tickers, 1):
-            logger.info(f"\n[{idx}/{len(tickers)}] Traitement {ticker}...")
+        for i, ticker in enumerate(tickers, 1):
+            logger.info(f"\n[{i}/{len(tickers)}] Traitement {ticker}...")
             
-            df = None
-            source = None
+            data = self.fetch_single_ticker(ticker, start_date, end_date)
             
-            # Tentative 1 : Cache local
-            df = self.get_from_cache(ticker, start_date, end_date)
-            if df is not None and not df.empty:
-                source = "cache"
-            
-            # Tentative 2 : Yahoo Finance
-            if df is None:
-                df = self.fetch_yahoo_finance(ticker, start_date, end_date)
-                if df is not None and not df.empty:
-                    source = "yahoo"
-            
-            # Tentative 3 : Alpha Vantage (si clé fournie)
-            if df is None and self.alpha_vantage_key:
-                df = self.fetch_alpha_vantage(ticker, start_date, end_date)
-                if df is not None and not df.empty:
-                    source = "alphavantage"
-            
-            # Échec complet
-            if df is None or df.empty:
-                logger.error(f"❌ {ticker}: ÉCHEC - Toutes sources ont échoué")
+            if data is not None:
+                results[ticker] = data
+            else:
                 failed_tickers.append(ticker)
-                continue
             
-            # Validation qualité données
-            is_valid, msg = self.validate_data(ticker, df)
-            
-            if not is_valid:
-                logger.error(f"❌ {msg}")
-                failed_tickers.append(ticker)
-                continue
-            
-            # Succès : sauvegarde cache + stockage
-            if source != "cache":
-                self.save_to_cache(ticker, df)
-            
-            data[ticker] = df
-            logger.info(f"✅ {ticker}: {len(df)} jours ({source}) - Prix final ${df['Close'].iloc[-1]:.2f}")
+            # Rate limiting (éviter ban Yahoo Finance)
+            if i < len(tickers):
+                time.sleep(0.5)
         
-        # Résumé final
-        logger.info("\n" + "=" * 80)
-        logger.info(f"📊 RÉSUMÉ RÉCUPÉRATION DONNÉES")
-        logger.info(f"✅ Succès: {len(data)}/{len(tickers)} ETF")
+        # Résumé
+        logger.info("\n" + "="*80)
+        logger.info("📊 RÉSUMÉ RÉCUPÉRATION DONNÉES")
+        logger.info(f"✅ Succès: {len(results)}/{len(tickers)} ETF")
         if failed_tickers:
             logger.warning(f"❌ Échecs: {len(failed_tickers)} ETF - {failed_tickers}")
-        logger.info("=" * 80)
+        logger.info("="*80)
         
-        return data
+        return results
 
 
-# =============================================================================
-# FONCTIONS COMPATIBILITÉ (drop-in replacement data_fetcher_hybrid)
-# =============================================================================
+# ============================================================================
+# FONCTIONS PUBLIQUES (Interface avec portfolio_engine.py)
+# ============================================================================
 
 def fetch_historical_data(
     tickers: List[str],
     start_date: datetime,
     end_date: datetime,
-    use_cache: bool = True,
-    alpha_vantage_key: Optional[str] = None
+    alpha_vantage_key: Optional[str] = None,
+    use_cache: bool = True
 ) -> Dict[str, pd.DataFrame]:
     """
-    Fonction compatible avec ancienne interface data_fetcher_hybrid.
-    
-    Drop-in replacement : remplacez simplement
-    ```python
-    from data_fetcher_hybrid import fetch_historical_data
-    ```
-    par
-    ```python
-    from data_fetcher_real import fetch_historical_data
-    ```
+    Point d'entrée principal pour récupérer des données historiques réelles
     
     Args:
-        tickers: Liste symbols ETF
-        start_date: Date début
-        end_date: Date fin
-        use_cache: Utiliser cache local (défaut True)
-        alpha_vantage_key: Clé API Alpha Vantage (optionnel)
-        
+        tickers: Liste symboles ETF (ex: ['VT', 'VOO', 'VWO'])
+        start_date: Date début période
+        end_date: Date fin période
+        alpha_vantage_key: Clé API Alpha Vantage (optionnel, fallback)
+        use_cache: Utiliser cache local (défaut: True)
+    
     Returns:
-        Dict {ticker: DataFrame}
+        Dictionnaire {ticker: DataFrame} avec colonnes ['close', 'volume', ...]
+    
+    Exemple:
+        >>> data = fetch_historical_data(
+        ...     tickers=['VT', 'VOO'],
+        ...     start_date=datetime(2024, 1, 1),
+        ...     end_date=datetime(2024, 12, 31)
+        ... )
+        >>> print(data['VT'].head())
     """
     fetcher = RealDataFetcher(
-        use_cache=use_cache,
-        alpha_vantage_key=alpha_vantage_key
+        alpha_vantage_key=alpha_vantage_key,
+        use_cache=use_cache
     )
-    return fetcher.fetch_historical_data(tickers, start_date, end_date)
-
-
-def get_latest_prices(tickers: List[str]) -> Dict[str, float]:
-    """
-    Récupère prix actuels pour liste tickers.
     
-    Compatible avec data_fetcher_hybrid.get_latest_prices()
+    return fetcher.fetch_multiple_tickers(tickers, start_date, end_date)
+
+
+def get_latest_price(ticker: str) -> Optional[float]:
+    """
+    Récupère le dernier prix disponible pour un ticker
     
     Args:
-        tickers: Liste symbols ETF
-        
+        ticker: Symbole ETF
+    
     Returns:
-        Dict {ticker: prix_actuel}
+        Prix de clôture le plus récent ou None
     """
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=5)
-    
-    data = fetch_historical_data(tickers, start_date, end_date)
-    
-    prices = {}
-    for ticker, df in data.items():
-        if not df.empty:
-            prices[ticker] = df['Close'].iloc[-1]
-    
-    return prices
+    try:
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=7)
+        
+        fetcher = RealDataFetcher(use_cache=False)
+        data = fetcher.fetch_single_ticker(ticker, start_date, end_date)
+        
+        if data is not None and not data.empty:
+            return float(data['close'].iloc[-1])
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur récupération prix {ticker}: {str(e)}")
+        return None
 
 
-def validate_data(df: pd.DataFrame, ticker: str) -> Tuple[bool, str]:
+def validate_ticker(ticker: str) -> bool:
     """
-    Valide qualité données ETF.
-    
-    Compatible avec data_fetcher_hybrid.validate_data()
+    Vérifie qu'un ticker existe et retourne des données
     
     Args:
-        df: DataFrame prix historiques
-        ticker: Symbol ETF
-        
+        ticker: Symbole ETF à valider
+    
     Returns:
-        (is_valid, message)
+        True si ticker valide, False sinon
     """
-    fetcher = RealDataFetcher(use_cache=False)
-    return fetcher.validate_data(ticker, df)
+    try:
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=7)
+        
+        fetcher = RealDataFetcher(use_cache=False)
+        data = fetcher.fetch_single_ticker(ticker, start_date, end_date)
+        
+        return data is not None and not data.empty
+        
+    except Exception:
+        return False
 
 
-# =============================================================================
+# ============================================================================
 # TESTS UNITAIRES
-# =============================================================================
+# ============================================================================
 
 if __name__ == "__main__":
-    import sys
-    
-    # Configuration logging console
+    # Configuration logging pour tests
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s | %(levelname)-8s | %(message)s',
-        datefmt='%H:%M:%S'
+        format='%(asctime)s | %(name)-20s | %(levelname)-8s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
     )
     
-    print("=" * 80)
-    print("🧪 TESTS UNITAIRES - RealDataFetcher")
-    print("=" * 80)
+    print("🧪 Tests data_fetcher_real.py\n")
     
-    # Test 1 : Récupération données réelles
-    print("\n📊 Test 1 : Récupération 3 ETF (Yahoo Finance)")
-    print("-" * 80)
-    
-    test_tickers = ['VOO', 'QQQ', 'VT']
+    # Test 1 : Ticker unique
+    print("Test 1: Récupération ticker unique (VOO)...")
     end = datetime.now()
     start = end - timedelta(days=365)
     
-    fetcher = RealDataFetcher(use_cache=True)
-    data = fetcher.fetch_historical_data(test_tickers, start, end)
+    data = fetch_historical_data(['VOO'], start, end)
     
-    print(f"\n✅ Résultats : {len(data)}/{len(test_tickers)} ETFs récupérés")
+    if 'VOO' in data:
+        print(f"✅ VOO: {len(data['VOO'])} jours récupérés")
+        print(f"   Colonnes: {list(data['VOO'].columns)}")
+        print(f"   Prix actuel: ${data['VOO']['close'].iloc[-1]:.2f}")
+    else:
+        print("❌ Échec récupération VOO")
     
-    for ticker, df in data.items():
-        is_valid, msg = fetcher.validate_data(ticker, df)
-        print(f"  {ticker}:")
-        print(f"    Jours: {len(df)}")
-        print(f"    Période: {df['Date'].min().date()} → {df['Date'].max().date()}")
-        print(f"    Prix: ${df['Close'].iloc[0]:.2f} → ${df['Close'].iloc[-1]:.2f}")
-        print(f"    Validation: {msg}")
+    # Test 2 : Prix en temps réel
+    print("\nTest 2: Prix en temps réel (VT)...")
+    price = get_latest_price('VT')
+    if price:
+        print(f"✅ VT: ${price:.2f}")
+    else:
+        print("❌ Échec récupération prix VT")
     
-    # Test 2 : Performance cache
-    print("\n\n💾 Test 2 : Performance cache (2ème exécution)")
-    print("-" * 80)
+    # Test 3 : Validation ticker
+    print("\nTest 3: Validation tickers...")
+    valid = validate_ticker('VOO')
+    invalid = validate_ticker('INVALID_TICKER_123')
+    print(f"✅ VOO valide: {valid}")
+    print(f"✅ INVALID_TICKER_123 invalide: {not invalid}")
     
-    import time as time_module
-    start_time = time_module.time()
-    
-    data_cached = fetcher.fetch_historical_data(test_tickers, start, end)
-    
-    elapsed = time_module.time() - start_time
-    print(f"✅ Temps exécution avec cache: {elapsed:.2f}s")
-    
-    # Test 3 : get_latest_prices
-    print("\n\n📈 Test 3 : Prix actuels")
-    print("-" * 80)
-    
-    prices = get_latest_prices(test_tickers)
-    for ticker, price in prices.items():
-        print(f"  {ticker}: ${price:.2f}")
-    
-    print("\n" + "=" * 80)
-    print("✅ TOUS LES TESTS TERMINÉS")
-    print("=" * 80)
+    print("\n🎉 Tests terminés!")
