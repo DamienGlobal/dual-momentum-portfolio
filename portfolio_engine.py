@@ -21,6 +21,7 @@ Author: GLOBAL ICON
 Date: 2025-10-28
 """
 
+import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -166,6 +167,7 @@ class DualMomentumPortfolio:
             tickers=tickers,
             start_date=start_date,
             end_date=end_date,
+            alpha_vantage_key=st.secrets.get("alpha_vantage", {}).get("api_key"),
             use_cache=True
         )
         
